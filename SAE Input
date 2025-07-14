@@ -1,0 +1,11 @@
+//Input Script
+
+// Every script needs a modifier function
+const modifier = (text) => {
+  text = onInput_SAE(text);
+
+  return { text }
+}
+
+// Don't modify this part
+modifier(text)
