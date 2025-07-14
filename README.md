@@ -19,6 +19,8 @@ Ensures major events stay tied together logically.
 You can view (Spoilers!) or edit the Story Arc at any time in the Story Cards under “Current Story Arc.”
 You are free to modify the settings as well in the settings story card.
 
+## How to Install
+Plug and play! Simply plug each script to their respective hooks. 
 Looking for play testers and feedback. Thank you!
 
 https://play.aidungeon.com/scenario/piAUFAqzm2xZ/story-arc-engine-wip
