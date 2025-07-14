@@ -1,0 +1,431 @@
+// Library Script
+
+// Story Arc Engine Script by Yi1i1i
+
+/* Credits: 
+  LewdLeah - Idea for AI calling, debugging, testing, feedback
+  Purplejump - Testing, feedback
+*/
+
+onLibrary_SAE();
+function onLibrary_SAE(){
+  // Update settingsSC at start of every hook
+  createIfNoSettingsSC();
+  retrieveSettingsFromSC();
+  storeSettingsToSC();
+  
+  // Update ArcSC at the start of every hook
+  createIfNoArcSC();
+  retrieveArcFromSC();
+  storeArcToSC();
+}
+
+function onInput_SAE(text){
+  text = helpCommandInput_SAE(text);
+
+  text = detectRedoStoryArc(text);
+
+  text = detectStopGenerating(text);
+
+  return text;
+}
+
+function onContext_SAE(text){
+  text = removeAngleText(text);
+  
+  text = feedAIPrompt(text);
+
+  text = feedStoryArc(text);
+  
+  text = logContextToSettingsSC(text);
+  //log(text);
+  
+  return text;
+}
+
+function onOutput_SAE(text) {
+  text = helpCommandOutput_SAE(text);
+
+  text = saveStoryArc(text);
+  //log("state.storyArc", state.storyArc);
+
+  text = callAIForArc(text);
+  
+  log(text);
+
+  arcElementRemoval();
+
+  turnCounter_SAE();
+  
+  return text;
+}
+
+function helpCommandInput_SAE(text){
+  if(text.includes("/help sae")){
+    text = " ";
+
+    state.commandCenter_SAE = 
+    `
+    << 
+    STORY ARC ENGINE By Yi1i1i
+    - Story Arc Engine calls the AI to create a story arc in the Author's notes to better guide future storytelling.
+    - Type "Story Arc" into story cards to access and modify settings. Logs are logged in the notes.
+    - Input "/redo arc" to call the AI to regen the story arc.
+    - Text encased in << >> are auto cleared from context.
+    - Repeated attempts for generating story arcs may be due to AI failing to fulfill instructions or low response length (< 125). Troubleshoot by stopping and retrying in a few turns, or edit your arc prompt in "Story Arc Settings".
+
+    - turnsPerAICall: Number of turns before calling AI to update the story arc. Takes in an integer.
+    - arcPrompt: Prompt that is fed to the AI to generate a story arc. Must be encased in << >>.
+    - attemptLimit: Number of attempts at generating story arc before stopping.
+    - turnsPerElemRemoval: Number of turns before removing the first plot point to progress the arc. Set to 0 to turn off removal.
+    >>
+    `
+  }
+
+  return text;
+}
+
+function helpCommandOutput_SAE(text){
+  if(state.commandCenter_SAE){
+    text = state.commandCenter_SAE;
+  }
+  delete state.commandCenter_SAE
+  return text;
+}
+
+// Prompt to be fed to AI context
+state.arcPrompt = state.arcPrompt || [`
+<<</SYSTEM>  
+- Stop the story.  
+- Only write a structured story arc outline for the future succeeding the current story by following these strict instructions:  
+- Write a numbered list of 11 major events within the story arc.  
+- Each event must be under 7 words.  
+- Events must be in chronological order.  
+- Each event must build on the last and be further in the future.  
+- Dont write clichés, dialogue, description, and prose.  
+- Dont write the protagonist, main character, and player.  
+- Use only brief, high-level story developments.  
+- Events contain turning points, twists, discoveries, conflicts, motives, and lore.  
+- Maintain immersion and consistent narrative tone.>>`
+];
+
+// Initialize variables
+if(state.unlockFeedAIPrompt == undefined){
+  state.unlockFeedAIPrompt = false;
+}
+
+if(state.saveOutput == undefined){
+  state.saveOutput = false;
+}
+
+if(state.storyArc == undefined){
+  state.storyArc = "";
+}
+
+if(state.attemptCounter == undefined){
+  state.attemptCounter = 0;
+}
+
+if (state.turnNum_SAE == undefined) {
+  state.turnNum_SAE = 1;
+}
+
+state.attemptLimit = state.attemptLimit || 3;
+
+state.turnsPerElemRemoval = state.turnsPerElemRemoval || 3;
+
+state.turnsPerAICall = state.turnsPerAICall || 35;
+log("state.turnsPerAICall: " + state.turnsPerAICall);
+
+// SAE Functions
+// Increment turn counter at end of onOutput
+function turnCounter_SAE(){
+  state.turnNum_SAE += 1;
+  log("state.turnNum_SAE: " + state.turnNum_SAE);
+}
+
+// Remove script texts to clean AI context
+function removeAngleText(text) {
+  return text.replace(/<<[\s\S]*?>>/g, '');
+}
+
+function createIfNoArcSC(){
+  if (!storyCards.find(sc => sc.title === "Current Story Arc")) {
+    // If sc doesn't exist, create it
+    addStoryCard("Current Story Arc", "", "Current Story Arc");
+
+    // Fetch the sc
+    const arcSC = storyCards.find(sc => sc.title === "Current Story Arc");
+    arcSC.keys = "/Current Story Arc"
+    arcSC.description = "SPOILERS! This story card stores the story arc being fed to the AI to improve storytelling. Feel free to modify the contents.";
+  }
+}
+
+function storeArcToSC(){
+  // Fetch the sc
+  const arcSC = storyCards.find(sc => sc.title === "Current Story Arc");
+
+  arcSC.entry = state.storyArc;
+}
+
+function retrieveArcFromSC(){
+  // Fetch the sc
+  const arcSC = storyCards.find(sc => sc.title === "Current Story Arc");
+
+  state.storyArc = arcSC.entry;
+}
+
+function createIfNoSettingsSC(){
+  if (!storyCards.find(sc => sc.title === "Story Arc Settings")) {
+    // If sc doesn't exist, create it
+    addStoryCard("Story Arc Settings", "", "Story Arc Settings");
+
+    // Fetch the sc
+    const settingsSC = storyCards.find(sc => sc.title === "Story Arc Settings");
+    settingsSC.description = `
+    turnsPerAICall: Number of turns before calling AI to update the story arc. Takes in an integer.
+    arcPrompt: Prompt that is fed to the AI to generate a story arc. Must be encased in << >>.
+    attemptLimit: Number of attempts at generating story arc before stopping.
+    turnsPerElemRemoval: Number of turns before removing the first plot point to progress the arc. Set to 0 to turn off removal.
+    `;
+  }
+}
+
+function storeSettingsToSC(){
+  // Fetch the sc
+  const settingsSC = storyCards.find(sc => sc.title === "Story Arc Settings");
+
+  settingsSC.entry = `turnsPerAICall = ${state.turnsPerAICall}\nattemptLimit = ${state.attemptLimit}\nturnsPerElemRemoval = ${state.turnsPerElemRemoval}\narcPrompt = ${state.arcPrompt}`
+}
+
+function retrieveSettingsFromSC(){
+  // Fetch the sc
+  const settingsSC = storyCards.find(sc => sc.title === "Story Arc Settings");
+
+  // Extract turnsPerAICall
+  const turnsMatch = settingsSC.entry.match(/turnsPerAICall\s*=\s*(\d+)/);
+  if (turnsMatch) {
+    state.turnsPerAICall = Number(turnsMatch[1]) ?? state.turnsPerAICall;
+  }
+
+  // Extract attemptLimit
+  const limitMatch = settingsSC.entry.match(/attemptLimit\s*=\s*(\d+)/);
+  if (limitMatch) {
+    state.attemptLimit = Number(limitMatch[1]) ?? state.attemptLimit;
+  }
+
+  // Extract turnsPerElemRemoval
+  const removalMatch = settingsSC.entry.match(/turnsPerElemRemoval\s*=\s*(\d+)/);
+  if (removalMatch) {
+    state.turnsPerElemRemoval = Number(removalMatch[1]) ?? state.turnsPerElemRemoval;
+  }
+
+  // Extract arcPrompt block
+  const promptMatch = settingsSC.entry.match(/arcPrompt\s*=\s*(<<[\s\S]*?>>)/);
+  if (promptMatch) {
+    state.arcPrompt = promptMatch[1];
+  }
+
+}
+
+// On output, waits for the correct turn to call AI for generating story arc
+function callAIForArc(text){
+  if (state.turnNum_SAE == 1 || state.turnNum_SAE % state.turnsPerAICall === 0) {
+    // Warn player of AI call next turn
+    text = text + "\n\n<< ⚠️ Updating Story Arc Next Turn! Click 'Continue' or type '/stop'. >>";
+
+    // Unlock feed prompt to AI for onContext
+    state.unlockFeedAIPrompt = true;
+    log("state.unlockFeedAIPrompt: " + state.unlockFeedAIPrompt);
+
+    // Unlock save resulting output to save story arc for next onOutput
+    state.saveOutput = true;
+    log("state.saveOutput: " + state.saveOutput);
+  }
+
+  return text;
+}
+
+// After AI is called, this function will feed the prompt onContext for AI to create a story arc
+function feedAIPrompt(text){
+  if(state.unlockFeedAIPrompt){
+    text = text + " " + state.arcPrompt;
+
+    // Turn off after done feeding
+    state.unlockFeedAIPrompt = false;
+  }
+
+  return text;
+}
+
+// After AI call and prompt is fed to context, this function saves the generated story arc during the following output hook
+function saveStoryArc(text){
+  if(state.saveOutput){
+    // Copy the generated story arc from the output text
+    outputtedArc = text;
+
+    // Clean story arc text to ensure no incomplete numbered lines
+    log("Before: ", outputtedArc);
+    outputtedArc = outputtedArc.replace(/\n?\d+\.\s*$/, '');
+    outputtedArc = outputtedArc
+      .split('\n')
+      .filter(line => /^\d+\.\s/.test(line.trim()))
+      .join('\n');
+    log("After: ", outputtedArc);
+
+    // Incorrect story arc formatting recalls AI
+    if (!/[89]/.test(outputtedArc)) {
+      // SAE Attempt Limit
+      if (state.attemptCounter == state.attemptLimit) {
+        state.saveOutput = false;
+
+        state.attemptCounter = 0;
+
+        text = `\n<< 🧱 Attempt Limit Reached: Keeping Current Arc. Type '/redo arc' or wait for next AI call. >>`
+
+      }
+      else {
+        state.unlockFeedAIPrompt = true;
+        state.saveOutput = true;
+
+        state.attemptCounter += 1;
+
+        text = `\n<< ⏳ Generating Story Arc (Attempt ${state.attemptCounter}/${state.attemptLimit})... Click 'Continue' or type '/stop'. >>`;
+      }
+    }
+    // Correct story arc formatting gets saved
+    else {
+      state.attemptCounter = 0;
+
+      state.storyArc = "Write the story in the following direction:\n" + outputtedArc;
+
+      text = "\n<< ✅ Story Arc generated and saved! Click 'Continue'. >>\n\n";
+
+      // Fetch the sc and log the previous arc in sc notes
+      const arcSC = storyCards.find(sc => sc.title === "Current Story Arc");
+      arcSC.description = `Log ${state.turnNum_SAE} | Previous Story Arc:\n${arcSC.entry}\n` + arcSC.description;
+
+      // Trim notes on char limit to prevent memory overfill
+      if (arcSC.description.length > 3000) {
+        halfIndex = Math.floor(arcSC.description.length / 2);
+        arcSC.description = arcSC.description.slice(0, halfIndex);
+
+        console.log("Trimming arcSC description to prevent memory overload.");
+      }
+
+      // Save the new story arc to the sc
+      storeArcToSC();
+
+      // Turn off save output when done saving story arc
+      state.saveOutput = false;
+
+    }
+  }
+
+  return text;
+}
+
+// Feeds the Story Arc into the Author's Note in the AI context every turn
+function feedStoryArc(text){
+  // Ensure story arc is fed only when a new story arc is not being generated
+  if(state.saveOutput == false){
+    text = text.replace(
+      /(\[Author's note: [\s\S]*?)(])/,
+      (_, noteStart, noteEnd) => noteStart + "\n" + state.storyArc + noteEnd
+    );
+  }
+
+  return text;
+}
+
+function detectRedoStoryArc(text){
+  if(text.includes("/redo arc")){
+    state.unlockFeedAIPrompt = true;
+    state.saveOutput = true;
+
+    text = "<< ➰ Regenerating Story Arc... >>"
+  }
+
+  return text;
+}
+
+// Function to allow player to stop story arc generating
+function detectStopGenerating(text){
+  if(text.includes("/stop") && state.unlockFeedAIPrompt == true){
+    state.unlockFeedAIPrompt = false;
+    state.saveOutput = false;
+
+    state.attemptCounter = 0;
+
+    text = "<< ⛔ Story Arc Generation Stopped. >>";
+  }
+
+  return text;
+}
+
+function logContextToSettingsSC(text){
+  // Fetch the sc
+  const settingsSC = storyCards.find(sc => sc.title === "Story Arc Settings");
+  
+  // Trim notes on char limit to prevent memory overfill
+  if(settingsSC.description.length > 3000){
+    halfIndex = Math.floor(settingsSC.description.length / 2);
+    settingsSC.description = settingsSC.description.slice(0, halfIndex);
+
+    console.log("Trimming settingsSC description to prevent memory overload.");
+  }
+
+  // Log to setting sc notes
+  settingsSC.description = `Context Log ${state.turnNum_SAE} | ${text}\n` + settingsSC.description;
+
+  return text;
+}
+
+function removeFirstListItem(text) {
+  // Match numbered list using regex, starting from a line that begins with a number
+  const lines = text.split('\n');
+
+  // Find the index where the numbered list starts
+  const startIndex = lines.findIndex(line => /^\d+\.\s/.test(line));
+  if (startIndex === -1) return text; // No list found
+
+  // Extract text before the list and the list itself
+  const beforeList = lines.slice(0, startIndex);
+  const listLines = lines.slice(startIndex);
+
+  // Remove first list item
+  listLines.shift();
+
+  // Renumber the remaining list
+  const renumberedList = listLines.map((line, idx) => {
+    return `${idx + 1}. ${line.replace(/^\d+\.\s*/, '')}`;
+  });
+
+  // Reassemble the full text
+  return [...beforeList, ...renumberedList].join('\n');
+}
+
+// Remove the first plot element in story arc every set turn to help clean and progress story arc
+function arcElementRemoval(){
+  if(state.saveOutput == false
+  && state.turnNum_SAE >= 5 
+  && state.turnNum_SAE % state.turnsPerElemRemoval == 0 
+  && state.turnsPerElemRemoval !== 0
+  ){
+    // Fetch the sc and log the previous arc in sc notes
+    const arcSC = storyCards.find(sc => sc.title === "Current Story Arc");
+
+    // Get first plot element to be removed and log to sc description
+    match = state.storyArc.match(/^1\.\s.*$/m);
+    if(match){
+      arcSC.description = `Log ${state.turnNum_SAE} | Plot Element Removed:\n${match[0]}\n` + arcSC.description;
+    }
+
+    // Remove first plot element and save the rest of the story arc
+    state.storyArc = removeFirstListItem(state.storyArc);
+    storeArcToSC();
+    log("\narcElementRemoval ran.")
+  }
+}
+
+
